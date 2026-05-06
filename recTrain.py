@@ -55,3 +55,15 @@ def get_recommendations(query, embeddings, df, top_n=5):
     similarities = cosine_similarity(query_embedding, embeddings)
     top_indices = similarities[0].argsort()[-top_n:][::-1]
     return df.iloc[top_indices]
+
+import argparse
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Get anime recommendations based on a query.")
+    parser.add_argument("query", type=str, nargs="?", default="Funny anime I can watch with friends", help="The search query")
+    args = parser.parse_args()
+
+    query = args.query
+    recommendations = get_recommendations(query, anime_embeddings, df)
+    print(f"Recommendations for '{query}':")
+    print(recommendations[['title_english', 'genres']])
