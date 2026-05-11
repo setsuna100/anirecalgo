@@ -20,9 +20,23 @@ def get_recommendations(query, top_n=5):
     # Convert user query to a semantic vector
     query_embedding = model.encode([query])
     # Compare the query vector to all anime vectors using cosine similarity
-    similarities = cosine_similarity(query_embedding, anime_embeddings)
-    # Sort and get the indices of all matches
-    sorted_indices = similarities[0].argsort()[::-1]
+    similarities = cosine_similarity(query_embedding, anime_embeddings)[0]
+    
+    # Normalize mean scores to be between 0 and 1, defaulting to 50 if missing
+    mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(50)
+    normalized_scores = mean_scores / 100.0
+    
+    # Soft score filter: gives a 20% score weight boost to shows with a mean score of 75 and above
+    score_boost = mean_scores.apply(lambda x: 1.2 if x >= 75 else 1.0)
+    
+    # Format filter: gives priority to TV series and Movies, penalizing OVAs, ONAs, and Specials
+    format_boost = df['format'].apply(lambda x: 1.0 if str(x).upper() in ['TV', 'MOVIE'] else 0.8)
+    
+    # Create a combined score (80% semantic match, 20% boosted mean score) and apply format weight
+    combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values
+    
+    # Sort and get the indices of all matches based on the combined score
+    sorted_indices = combined_scores.argsort()[::-1]
     
     selected_indices = []
     seen_titles = []
@@ -71,5 +85,5 @@ if __name__ == "__main__":
         for i, row in enumerate(recs.itertuples(), 1):
             title = row.title_english if row.title_english else row.title_romaji
             genres = str(row.genres).replace("|", ", ")
-            print(f"{i}. {title} (Score: {row.average_score}) - {genres}")
+            print(f"{i}. {title} ({row.format}, Score: {row.mean_score}) - {genres}")
         print("-" * 50)
