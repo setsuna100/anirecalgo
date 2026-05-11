@@ -60,13 +60,13 @@ def fetch_page(page, per_page=50):
         raise RuntimeError(f"GraphQL errors: {data['errors']}")
     return data["data"]["Page"]
 
-def fetch_top_1000():
+def fetch_top_5000():
     all_anime = []
     per_page = 50
-    total_needed = 1000
+    total_needed = 5000
     page = 1
 
-    print("Fetching top 1000 anime from AniList...")
+    print("Fetching top 5000 anime from AniList...")
 
     while len(all_anime) < total_needed:
         print(f"  Fetching page {page} ({len(all_anime)}/{total_needed})...")
@@ -84,8 +84,14 @@ def fetch_top_1000():
             break
 
         page += 1
-        # Respect AniList rate limit: 90 requests/minute
-        time.sleep(0.7)
+        
+        # Pause for 1 minute every 1500 shows to prevent 429 Too Many Requests
+        if len(all_anime) > 0 and len(all_anime) % 1500 == 0 and len(all_anime) < total_needed:
+            print(f"Fetched {len(all_anime)} shows. Pausing for 1 minute to reset rate limits...")
+            time.sleep(60)
+        else:
+            # Respect AniList rate limit: 90 requests/minute
+            time.sleep(0.7)
 
     return all_anime[:total_needed]
 
@@ -143,6 +149,6 @@ def export_csv(anime_list, output_path):
     print(f"\nExported {len(anime_list)} anime to {output_path}")
 
 if __name__ == "__main__":
-    anime_list = fetch_top_1000()
-    output_path = "top1000.csv"
+    anime_list = fetch_top_5000()
+    output_path = "top5000.csv"
     export_csv(anime_list, output_path)
