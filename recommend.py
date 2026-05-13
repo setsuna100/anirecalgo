@@ -1,6 +1,7 @@
 import pandas as pd
 import pickle
 import difflib
+import re
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -16,9 +17,68 @@ with open('anime_embeddings.pkl', 'rb') as f:
 # 3. Load the local NLP Model
 model = SentenceTransformer('./local_anime_model')
 
+# 4. Extract all unique genres and tags from the dataframe for keyword detection
+all_genres_tags = set()
+if 'genres' in df.columns:
+    for g_val in df['genres'].dropna():
+        for g in str(g_val).split('|'):
+            if g.strip(): all_genres_tags.add(g.strip().lower())
+if 'tags' in df.columns:
+    for t_val in df['tags'].dropna():
+        for t in str(t_val).split('|'):
+            if t.strip(): all_genres_tags.add(t.strip().lower())
+
+# Sort keywords by length descending so longer phrases match before shorter ones
+valid_keywords = sorted(list(all_genres_tags), key=len, reverse=True)
+
 def get_recommendations(query, top_n=5):
+    original_query_lower = query.lower()
+    search_query = query
+    
+    found_titles = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        t_eng = str(row['title_english']) if pd.notna(row['title_english']) and row['title_english'] else ""
+        t_rom = str(row['title_romaji']) if pd.notna(row['title_romaji']) and row['title_romaji'] else ""
+        
+        if len(t_eng) > 3 and t_eng.lower() in original_query_lower:
+            found_titles.append((t_eng, i))
+        if len(t_rom) > 3 and t_rom.lower() in original_query_lower:
+            found_titles.append((t_rom, i))
+            
+    # Sort by length descending to replace longer titles first (e.g., "Attack on Titan" before "Titan")
+    found_titles.sort(key=lambda x: len(x[0]), reverse=True)
+    
+    replaced_titles = []
+    for title, idx in found_titles:
+        if any(title.lower() in r.lower() for r in replaced_titles):
+            continue
+        match_row = df.iloc[idx]
+        genres_str = str(match_row['genres']).replace('|', ' ') if pd.notna(match_row['genres']) else ""
+        tags_str = str(match_row['tags']).replace('|', ' ') if pd.notna(match_row['tags']) else ""
+        
+        search_query = re.sub(re.escape(title), f"{genres_str} {tags_str}", search_query, flags=re.IGNORECASE)
+        replaced_titles.append(title)
+        
+    if replaced_titles:
+        titles_str = ", ".join(replaced_titles)
+        print(f"\n  [Detected anime in prompt: {titles_str}. Searching by tags instead...]")
+        
+    # Detect explicit genres or tags in the prompt
+    mentioned_keywords = []
+    temp_query = original_query_lower
+    for kw in valid_keywords:
+        pattern = r'\b' + re.escape(kw) + r'\b'
+        if re.search(pattern, temp_query):
+            mentioned_keywords.append(kw)
+            temp_query = re.sub(pattern, ' ', temp_query)
+            
+    if mentioned_keywords:
+        display_kws = ", ".join([kw.title() for kw in mentioned_keywords])
+        print(f"\n  [Detected genres/tags in prompt: {display_kws}]")
+
     # Convert user query to a semantic vector
-    query_embedding = model.encode([query])
+    query_embedding = model.encode([search_query])
     # Compare the query vector to all anime vectors using cosine similarity
     similarities = cosine_similarity(query_embedding, anime_embeddings)[0]
     
@@ -32,15 +92,28 @@ def get_recommendations(query, top_n=5):
     # Format filter: gives priority to TV series and Movies, penalizing OVAs, ONAs, and Specials
     format_boost = df['format'].apply(lambda x: 1.0 if str(x).upper() in ['TV', 'MOVIE'] else 0.8)
     
-    # Create a combined score (80% semantic match, 20% boosted mean score) and apply format weight
-    combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values
+    # Calculate genre/tag boost based on explicit mentions
+    keyword_boost = []
+    for i in range(len(df)):
+        row = df.iloc[i]
+        item_keywords = set()
+        if 'genres' in df.columns and pd.notna(row['genres']):
+            item_keywords.update([g.strip().lower() for g in str(row['genres']).split('|')])
+        if 'tags' in df.columns and pd.notna(row['tags']):
+            item_keywords.update([t.strip().lower() for t in str(row['tags']).split('|')])
+        
+        matches = sum(1 for kw in mentioned_keywords if kw in item_keywords)
+        keyword_boost.append(1.0 + (0.3 * matches)) # 30% score boost per matching keyword
+        
+    # Create a combined score and apply format weight + keyword boost
+    combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values * pd.Series(keyword_boost).values
     
     # Sort and get the indices of all matches based on the combined score
     sorted_indices = combined_scores.argsort()[::-1]
     
     selected_indices = []
     seen_titles = []
-    query_lower = query.lower()
+    query_lower = original_query_lower
 
     for idx in sorted_indices:
         row = df.iloc[idx]
