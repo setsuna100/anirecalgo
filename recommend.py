@@ -5,20 +5,16 @@ import re
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# 1. Load the DataFrame
 df = pd.read_pickle('anime_df.pkl')
 
-# 2. Load the pre-computed embeddings
 with open('anime_embeddings.pkl', 'rb') as f:
     anime_embeddings_spoilers = pickle.load(f)
 
 with open('anime_embeddings_no_spoilers.pkl', 'rb') as f:
     anime_embeddings_no_spoilers = pickle.load(f)
 
-# 3. Load the local NLP Model
 model = SentenceTransformer('./local_anime_model')
 
-# 4. Extract all unique genres and tags from the dataframe for keyword detection
 all_genres_tags = set()
 if 'genres' in df.columns:
     for g_val in df['genres'].dropna():
@@ -29,10 +25,8 @@ if 'tags' in df.columns:
         for t in str(t_val).split('|'):
             if t.strip(): all_genres_tags.add(t.strip().lower())
 
-# Sort keywords by length descending so longer phrases match before shorter ones
 valid_keywords = sorted(list(all_genres_tags), key=len, reverse=True)
 
-# 5. Build franchise groupings to prioritize the earliest show
 def clean_id(val):
     s = str(val).strip()
     return s[:-2] if s.endswith('.0') else s
@@ -48,7 +42,6 @@ if 'prequel_id' in df.columns and 'sequel_id' in df.columns:
         if pd.notna(row.get('sequel_id')) and str(row['sequel_id']).strip():
             franchise_graph[aid].update(clean_id(x) for x in str(row['sequel_id']).split('|') if x.strip())
 
-# Ensure bi-directional edges
 for node, neighbors in list(franchise_graph.items()):
     for neighbor in neighbors:
         if neighbor not in franchise_graph:
@@ -97,7 +90,6 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         if len(t_rom) > 3 and t_rom.lower() in original_query_lower:
             found_titles.append((t_rom, i))
             
-    # Sort by length descending to replace longer titles first (e.g., "Attack on Titan" before "Titan")
     found_titles.sort(key=lambda x: len(x[0]), reverse=True)
     
     replaced_titles = []
@@ -115,7 +107,6 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         titles_str = ", ".join(replaced_titles)
         print(f"\n  [Detected anime in prompt: {titles_str}. Searching by tags instead...]")
         
-    # Detect explicit genres or tags in the prompt
     mentioned_keywords = []
     temp_query = original_query_lower
     for kw in valid_keywords:
@@ -128,26 +119,19 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         display_kws = ", ".join([kw.title() for kw in mentioned_keywords])
         print(f"\n  [Detected genres/tags in prompt: {display_kws}]")
 
-    # Convert user query to a semantic vector
     query_embedding = model.encode([search_query])
 
-    # Choose which embeddings to search against
     target_embeddings = anime_embeddings_spoilers if use_spoilers else anime_embeddings_no_spoilers
 
-    # Compare the query vector to all anime vectors using cosine similarity
     similarities = cosine_similarity(query_embedding, target_embeddings)[0]
     
-    # Normalize mean scores to be between 0 and 1, defaulting to 0 if missing
     mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(0)
     normalized_scores = mean_scores / 100.0
     
-    # Soft score filter: gives a 20% score weight boost to shows with a mean score of 75 and above
     score_boost = mean_scores.apply(lambda x: 1.2 if x >= 75 else 1.0)
     
-    # Format filter: gives priority to TV series and Movies, penalizing OVAs, ONAs, and Specials
     format_boost = df['format'].apply(lambda x: 1.0 if str(x).upper() in ['TV', 'MOVIE'] else 0.8)
     
-    # Calculate genre/tag boost based on explicit mentions
     keyword_boost = []
     for i in range(len(df)):
         row = df.iloc[i]
@@ -160,10 +144,8 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         matches = sum(1 for kw in mentioned_keywords if kw in item_keywords)
         keyword_boost.append(1.0 + (0.3 * matches)) # 30% score boost per matching keyword
         
-    # Create a combined score and apply format weight + keyword boost
     combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values * pd.Series(keyword_boost).values
     
-    # Sort and get the indices of all matches based on the combined score
     sorted_indices = combined_scores.argsort()[::-1]
     
     selected_indices = []
@@ -191,7 +173,6 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         if (len(t_eng) > 3 and t_eng.lower() in query_lower) or (len(t_rom) > 3 and t_rom.lower() in query_lower):
             continue
             
-        # Check for sequels or very similar names to already selected recommendations
         is_duplicate = False
         for seen in seen_titles:
             if t_eng and (t_eng.lower() in seen.lower() or seen.lower() in t_eng.lower() or difflib.SequenceMatcher(None, t_eng.lower(), seen.lower()).ratio() > 0.75):
@@ -214,31 +195,3 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
     return df.iloc[selected_indices]
 
 print("System Ready!\n" + "-" * 50)
-
-if __name__ == "__main__":
-    while True:
-        user_query = input("\nWhat kind of anime would you like to watch? (type 'exit' to quit):\n> ")
-        if user_query.lower() in ['exit', 'quit']:
-            break
-        
-        recs = get_recommendations(user_query)
-        for i, row in enumerate(recs.itertuples(), 1):
-            title = row.title_english if row.title_english else row.title_romaji
-            genres = str(row.genres).replace("|", ", ")
-            
-            year = ""
-            if pd.notna(row.season_year) and str(row.season_year).strip():
-                try:
-                    year = f" ({int(float(row.season_year))})"
-                except ValueError:
-                    pass
-
-            fmt = str(row.format)
-            if fmt.upper() == 'TV' and pd.notna(row.episodes) and str(row.episodes).strip():
-                try:
-                    fmt += f" ({int(float(row.episodes))} eps)"
-                except ValueError:
-                    pass
-                    
-            print(f"{i}. {title}{year} ({fmt}, Score: {row.mean_score}) - {genres}")
-        print("-" * 50)

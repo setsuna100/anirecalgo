@@ -6,12 +6,7 @@ df = pd.read_csv('top5000.csv')
 df = df.fillna('')
 
 def get_weighted_tags_string(tags_str: str, max_repetitions: int = 5, weight_multiplier: float = 1.0) -> str:
-    """
-    Processes a pipe-separated string of tags, weighting them by order.
-    The first tag gets 100% weight, the last gets 20%, scaled linearly.
-    The weight is then multiplied by weight_multiplier to boost or reduce its overall effect.
-    Final weight is implemented by repeating the tag to influence the NLP model.
-    """
+
     if not isinstance(tags_str, str) or not tags_str:
         return ""
 
@@ -21,7 +16,6 @@ def get_weighted_tags_string(tags_str: str, max_repetitions: int = 5, weight_mul
     if n_tags == 0:
         return ""
     
-    # If only one tag, give it max weight
     if n_tags == 1:
         return ' '.join([tags[0]] * max(1, round(weight_multiplier * max_repetitions)))
 
@@ -36,12 +30,9 @@ def get_weighted_tags_string(tags_str: str, max_repetitions: int = 5, weight_mul
         
     return ' '.join(weighted_tag_list)
 
-# Create a new column with weighted tags
 df['weighted_tags'] = df['tags'].astype(str).apply(lambda x: get_weighted_tags_string(x, weight_multiplier=1.2))
 df['weighted_sp_tags'] = df['sp_tags'].astype(str).apply(lambda x: get_weighted_tags_string(x, weight_multiplier=0.8))
 
-# Convert each column to a string during concatenation to avoid TypeErrors
-# Replacing '|' with a space helps the NLP model read them as distinct words
 df['description'] = (
     df['title_english'].astype(str) + ' ' + 
     df['genres'].astype(str).str.replace('|', ' ') + ' ' + 
@@ -66,13 +57,12 @@ anime_embeddings = model.encode(df['description'].tolist())
 anime_embeddings_no_spoilers = model.encode(df['description_no_spoilers'].tolist())
 
 print("Saving embeddings and model...")
-# Save the generated embeddings and dataframe
+
 with open('anime_embeddings.pkl', 'wb') as f:
     pickle.dump(anime_embeddings, f)
 with open('anime_embeddings_no_spoilers.pkl', 'wb') as f:
     pickle.dump(anime_embeddings_no_spoilers, f)
 df.to_pickle('anime_df.pkl')
 
-# Save the transformer model locally
 model.save('./local_anime_model')
 print("Saved successfully!")
