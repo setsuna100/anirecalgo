@@ -6,7 +6,6 @@ import requests
 import difflib
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ── GraphQL Query ──────────────────────────────────────────────────────────────
 ANILIST_API = "https://graphql.anilist.co"
 USER_LIST_QUERY = """
 query ($userName: String) {
@@ -86,10 +85,65 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
     with open('anime_embeddings.pkl', 'rb') as f:
         anime_embeddings = pickle.load(f)
 
-    # Identify what the user has watched to exclude it
+    def clean_id(val):
+        s = str(val).strip()
+        return s[:-2] if s.endswith('.0') else s
+
+    id_to_idx = {clean_id(df.iloc[i]['id']): i for i in range(len(df))}
+    franchise_graph = {aid: set() for aid in id_to_idx}
+
+    if 'prequel_id' in df.columns and 'sequel_id' in df.columns:
+        for aid, idx in id_to_idx.items():
+            row = df.iloc[idx]
+            if pd.notna(row.get('prequel_id')) and str(row['prequel_id']).strip():
+                franchise_graph[aid].update(clean_id(x) for x in str(row['prequel_id']).split('|') if x.strip())
+            if pd.notna(row.get('sequel_id')) and str(row['sequel_id']).strip():
+                franchise_graph[aid].update(clean_id(x) for x in str(row['sequel_id']).split('|') if x.strip())
+
+    for node, neighbors in list(franchise_graph.items()):
+        for neighbor in neighbors:
+            if neighbor not in franchise_graph:
+                franchise_graph[neighbor] = set()
+            franchise_graph[neighbor].add(node)
+
+    visited = set()
+    idx_to_earliest_idx = {}
+    franchise_components = []
+
+    for node in franchise_graph:
+        if node not in visited:
+            component = set()
+            stack = [node]
+            while stack:
+                curr = stack.pop()
+                if curr not in visited:
+                    visited.add(curr)
+                    component.add(curr)
+                    for neighbor in franchise_graph.get(curr, []):
+                        if neighbor not in visited:
+                            stack.append(neighbor)
+            
+            franchise_components.append(component)
+            
+            valid_indices = [id_to_idx[n] for n in component if n in id_to_idx]
+            if valid_indices:
+                def get_sort_key(i):
+                    y = df.iloc[i].get('season_year')
+                    try: return float(y)
+                    except (ValueError, TypeError): return 9999.0
+                
+                earliest_idx = min(valid_indices, key=lambda i: (get_sort_key(i), i))
+                for i in valid_indices:
+                    idx_to_earliest_idx[i] = earliest_idx
+
     watched_ids = set([a['media_id'] for a in user_anime if pd.notna(a['media_id'])])
+    watched_ids_clean = set(clean_id(x) for x in watched_ids)
     
-    # Build user profile embedding based on highly rated or completed shows
+    expanded_watched_ids = set(watched_ids_clean)
+    for component in franchise_components:
+        if not component.isdisjoint(watched_ids_clean):
+            expanded_watched_ids.update(component)
+    
     liked_ids = []
     liked_weights = {}
     for a in user_anime:
@@ -98,45 +152,38 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
         except ValueError:
             score = 0
             
-        # Consider a show "liked" if scored >= 7 on a 10 scale, >= 70 on a 100 scale, or if they completed it
         if score >= 7 or score >= 70 or a['user_status'] == 'COMPLETED':
             liked_ids.append(a['media_id'])
             
-            # Give double weighting for user_score > 80 (or > 8 on a 10-point scale)
-            if score > 80 or (8 < score <= 10):
-                liked_weights[a['media_id']] = 2.0
+            if score > 0:
+                norm_score = score if score <= 10 else score / 10.0
+                liked_weights[a['media_id']] = norm_score
             else:
-                liked_weights[a['media_id']] = 1.0
+                liked_weights[a['media_id']] = 7.0  # Baseline weight for unscored but completed shows
              
     if not liked_ids:
-        # Fallback if no scores/completed shows found
         liked_ids = list(watched_ids)
         liked_weights = {mid: 1.0 for mid in liked_ids}
 
-    # Get the positional indices of the liked anime in our local dataset
     liked_indices = np.where(df['id'].isin(liked_ids))[0].tolist()
     
     if not liked_indices:
         print("Not enough matching anime in the database to build a user profile.")
         return []
         
-    # Create the user profile by taking a weighted average of embeddings of their liked shows
     user_embs = anime_embeddings[liked_indices]
     weights = np.array([liked_weights.get(df.iloc[idx]['id'], 1.0) for idx in liked_indices])
     profile_embedding = np.average(user_embs, axis=0, weights=weights).reshape(1, -1)
     
-    # Calculate similarities against ALL anime
     similarities = cosine_similarity(profile_embedding, anime_embeddings)[0]
     
-    # Apply boosts
     mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(50)
     normalized_scores = mean_scores / 100.0
-    score_boost = mean_scores.apply(lambda x: 1.2 if x >= 75 else 1.0)
+    score_boost = mean_scores.apply(lambda x: 1.5 if x >= 80 else (1.2 if x >= 70 else 1.0))
     format_boost = df['format'].apply(lambda x: 1.0 if str(x).upper() in ['TV', 'MOVIE'] else 0.8)
     
-    combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values
+    combined_scores = ((similarities * 0.7) + (normalized_scores.values * score_boost.values * 0.3)) * format_boost.values
     
-    # Sort by combined score
     sorted_indices = combined_scores.argsort()[::-1]
     
     print("\n" + "=" * 60)
@@ -146,14 +193,20 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
     count = 0
     seen_titles = []
     recommendations = []
-    for idx in sorted_indices:
-        row = df.iloc[idx]
+    selected_indices = []
+    for original_idx in sorted_indices:
+        # Map to the first season/earliest entry of the franchise
+        idx = idx_to_earliest_idx.get(int(original_idx), int(original_idx))
         
-        # Skip if already watched
-        if row['id'] in watched_ids:
+        if idx in selected_indices:
             continue
             
-        # Filter out Ecchi/Hentai if not allowed
+        row = df.iloc[idx]
+        
+        # Exclude if the user has watched this show OR any prequel/sequel in the franchise
+        if row['id'] in watched_ids or clean_id(row['id']) in expanded_watched_ids:
+            continue
+            
         if not allow_ecchi:
             g_str = str(row['genres']).lower() if pd.notna(row['genres']) else ""
             t_str = str(row['tags']).lower() if pd.notna(row['tags']) else ""
@@ -164,7 +217,6 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
         t_rom = str(row['title_romaji']) if pd.notna(row['title_romaji']) and row['title_romaji'] else ""
         title = t_eng if t_eng else t_rom
         
-        # Check for sequels or very similar names to already selected recommendations
         is_duplicate = False
         for seen in seen_titles:
             if t_eng and (t_eng.lower() in seen.lower() or seen.lower() in t_eng.lower() or difflib.SequenceMatcher(None, t_eng.lower(), seen.lower()).ratio() > 0.75):
@@ -182,18 +234,26 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
         fmt = row['format'] if pd.notna(row['format']) else "Unknown"
         score = row['mean_score'] if pd.notna(row['mean_score']) else "N/A"
         
-        print(f"{count+1}. {title}")
-        print(f"   Format: {fmt} | Score: {score}")
-        print(f"   Genres: {genres}")
-        print("-" * 60)
-        
+        episodes = ""
+        if pd.notna(row['season_year']) and str(row['season_year']).strip():
+            try:
+                year = int(float(row['season_year']))
+            except ValueError:
+                year = row['season_year']
+                
+        match_pct = f"{similarities[idx] * 100:.1f}%"
+                
         recommendations.append({
             "title": title,
             "format": fmt,
+            "episodes": episodes,
             "score": score,
-            "genres": genres
+            "genres": genres,
+            "year": year,
+            "match_score": match_pct
         })
         
+        selected_indices.append(idx)
         count += 1
         if count >= top_n:
             break

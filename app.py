@@ -72,13 +72,16 @@ def text_recommend():
                 except ValueError:
                     year = row['season_year']
             
+            match_score = f"{row['match_score'] * 100:.1f}%" if 'match_score' in row else "N/A"
+            
             recs.append({
                 "title": title,
                 "format": fmt,
                 "episodes": episodes,
                 "score": score,
                 "genres": genres,
-                "year": year
+                "year": year,
+                "match_score": match_score
             })
             
         return jsonify({"recommendations": recs})

@@ -23,7 +23,7 @@
 
     <div style="text-align: center; margin-bottom: 20px;">
         <label><input type="checkbox" id="useSpoilers"> Include Spoiler Tags</label>
-        <label style="margin-left: 15px;"><input type="checkbox" id="allowEcchi"> Include Ecchi</label>
+        <label style="margin-left: 15px;"><input type="checkbox" id="allowEcchi"> Include NSFW Entries</label>
     </div>
 
     <div id="loading" class="loader">Loading your personalized recommendations... this might take a moment.</div>
@@ -71,11 +71,12 @@
                     data.recommendations.forEach((rec, index) => {
                         const epsText = (rec.format && String(rec.format).toUpperCase() === 'TV' && rec.episodes) ? ` (${rec.episodes} eps)` : '';
                         const yearText = rec.year ? ` (${rec.year})` : '';
+                        const matchScoreText = rec.match_score && rec.match_score !== "N/A" ? ` &nbsp;|&nbsp; <strong style="color: #4CAF50;">Match: ${rec.match_score}</strong>` : '';
                         const card = document.createElement('div');
                         card.className = 'card';
                         card.innerHTML = `
                             <h3>${index + 1}. ${rec.title}${yearText}</h3>
-                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}${matchScoreText}</div>
                             <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
                         `;
                         resultsDiv.appendChild(card);
@@ -131,11 +132,12 @@
                     data.recommendations.forEach((rec, index) => {
                         const epsText = (rec.format && String(rec.format).toUpperCase() === 'TV' && rec.episodes) ? ` (${rec.episodes} eps)` : '';
                         const yearText = rec.year ? ` (${rec.year})` : '';
+                        const matchScoreText = rec.match_score && rec.match_score !== "N/A" ? ` &nbsp;|&nbsp; <strong style="color: #4CAF50;">Match: ${rec.match_score}</strong>` : '';
                         const card = document.createElement('div');
                         card.className = 'card';
                         card.innerHTML = `
                             <h3>${index + 1}. ${rec.title}${yearText}</h3>
-                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}${matchScoreText}</div>
                             <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
                         `;
                         resultsDiv.appendChild(card);

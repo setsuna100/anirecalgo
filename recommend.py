@@ -128,12 +128,16 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
     mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(0)
     normalized_scores = mean_scores / 100.0
     
-    score_boost = mean_scores.apply(lambda x: 1.2 if x >= 75 else 1.0)
+    score_boost = mean_scores.apply(lambda x: 1.5 if x >= 80 else (1.2 if x >= 70 else 1.0))
     
     format_boost = df['format'].apply(lambda x: 1.0 if str(x).upper() in ['TV', 'MOVIE'] else 0.8)
     
-    keyword_boost = []
+    tag_filter_mask = []
     for i in range(len(df)):
+        if not mentioned_keywords:
+            tag_filter_mask.append(1.0)
+            continue
+            
         row = df.iloc[i]
         item_keywords = set()
         if 'genres' in df.columns and pd.notna(row['genres']):
@@ -141,10 +145,12 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         if 'tags' in df.columns and pd.notna(row['tags']):
             item_keywords.update([t.strip().lower() for t in str(row['tags']).split('|')])
         
-        matches = sum(1 for kw in mentioned_keywords if kw in item_keywords)
-        keyword_boost.append(1.0 + (0.3 * matches)) # 30% score boost per matching keyword
+        if all(kw in item_keywords for kw in mentioned_keywords):
+            tag_filter_mask.append(1.0)
+        else:
+            tag_filter_mask.append(0.0) # Zero score for shows missing any keyword
         
-    combined_scores = ((similarities * 0.8) + (normalized_scores.values * score_boost.values * 0.2)) * format_boost.values * pd.Series(keyword_boost).values
+    combined_scores = ((similarities * 0.7) + (normalized_scores.values * score_boost.values * 0.3)) * format_boost.values * pd.Series(tag_filter_mask).values
     
     sorted_indices = combined_scores.argsort()[::-1]
     
@@ -153,12 +159,15 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
     query_lower = original_query_lower
 
     for original_idx in sorted_indices:
+        # If strict filtering is applied and score is zeroed out, skip
+        if combined_scores[original_idx] == 0.0 and mentioned_keywords:
+            continue
+            
         idx = idx_to_earliest_idx.get(int(original_idx), int(original_idx))
         
         if idx in selected_indices:
             continue
             
-        # Filter out Ecchi/Hentai if not allowed
         if not allow_ecchi:
             g_str = str(df.iloc[idx]['genres']).lower() if pd.notna(df.iloc[idx]['genres']) else ""
             t_str = str(df.iloc[idx]['tags']).lower() if pd.notna(df.iloc[idx]['tags']) else ""
@@ -169,7 +178,6 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         t_eng = str(row['title_english']) if pd.notna(row['title_english']) and row['title_english'] else ""
         t_rom = str(row['title_romaji']) if pd.notna(row['title_romaji']) and row['title_romaji'] else ""
         
-        # Skip if the show is directly mentioned in the user's prompt
         if (len(t_eng) > 3 and t_eng.lower() in query_lower) or (len(t_rom) > 3 and t_rom.lower() in query_lower):
             continue
             
@@ -192,6 +200,8 @@ def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
         if len(selected_indices) == top_n:
             break
 
-    return df.iloc[selected_indices]
+    result_df = df.iloc[selected_indices].copy()
+    result_df['match_score'] = [similarities[i] for i in selected_indices]
+    return result_df
 
 print("System Ready!\n" + "-" * 50)
