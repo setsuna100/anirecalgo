@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>anime recommendation algorithm</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <h1>Anime Recommender Engine</h1>
+    <p class="subtitle">Enter your AniList username OR describe what you want to watch!</p>
+
+    <div class="search-container">
+        <input type="text" id="username" placeholder="AniList Username (e.g. your_username)" onkeypress="if(event.key === 'Enter') getRecommendations()">
+        <button id="searchBtn" onclick="getRecommendations()">By Username</button>
+    </div>
+
+    <div class="search-container">
+        <input type="text" id="textQuery" placeholder="Describe a vibe (e.g. dark fantasy with vampires)" onkeypress="if(event.key === 'Enter') getTextRecommendations()">
+        <button id="textSearchBtn" onclick="getTextRecommendations()">By Description</button>
+    </div>
+
+    <div id="loading" class="loader">Loading your personalized recommendations... this might take a moment.</div>
+    <div id="error" class="error"></div>
+    <div id="results" class="results"></div>
+
+    <script>
+        async function getRecommendations() {
+            const username = document.getElementById('username').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+            const searchBtn = document.getElementById('searchBtn');
+            const textSearchBtn = document.getElementById('textSearchBtn');
+
+            if (!username) return;
+
+            // Reset UI
+            resultsDiv.innerHTML = '';
+            errorDiv.style.display = 'none';
+            loadingDiv.style.display = 'block';
+            searchBtn.disabled = true;
+            textSearchBtn.disabled = true;
+
+            try {
+                const response = await fetch('/recommend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+
+                const data = await response.json();
+                loadingDiv.style.display = 'none';
+                searchBtn.disabled = false;
+                textSearchBtn.disabled = false;
+
+                if (!response.ok) {
+                    errorDiv.innerHTML = `Error: ${data.error}`;
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                if (data.recommendations && data.recommendations.length > 0) {
+                    data.recommendations.forEach((rec, index) => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        card.innerHTML = `
+                            <h3>${index + 1}. ${rec.title}</h3>
+                            <div class="meta"><strong>Format:</strong> ${rec.format} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
+                        `;
+                        resultsDiv.appendChild(card);
+                    });
+                }
+            } catch (err) {
+                loadingDiv.style.display = 'none';
+                searchBtn.disabled = false;
+                textSearchBtn.disabled = false;
+                errorDiv.innerHTML = `Error: ${err.message}`;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        async function getTextRecommendations() {
+            const query = document.getElementById('textQuery').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+            const searchBtn = document.getElementById('searchBtn');
+            const textSearchBtn = document.getElementById('textSearchBtn');
+
+            if (!query) return;
+
+            // Reset UI
+            resultsDiv.innerHTML = '';
+            errorDiv.style.display = 'none';
+            loadingDiv.style.display = 'block';
+            searchBtn.disabled = true;
+            textSearchBtn.disabled = true;
+
+            try {
+                const response = await fetch('/text_recommend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+
+                const data = await response.json();
+                loadingDiv.style.display = 'none';
+                searchBtn.disabled = false;
+                textSearchBtn.disabled = false;
+
+                if (!response.ok) {
+                    errorDiv.innerHTML = `Error: ${data.error}`;
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                if (data.recommendations && data.recommendations.length > 0) {
+                    data.recommendations.forEach((rec, index) => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        card.innerHTML = `
+                            <h3>${index + 1}. ${rec.title}</h3>
+                            <div class="meta"><strong>Format:</strong> ${rec.format} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
+                        `;
+                        resultsDiv.appendChild(card);
+                    });
+                }
+            } catch (err) {
+                loadingDiv.style.display = 'none';
+                searchBtn.disabled = false;
+                textSearchBtn.disabled = false;
+                errorDiv.innerHTML = `Error: ${err.message}`;
+                errorDiv.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>
