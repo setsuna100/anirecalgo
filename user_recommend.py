@@ -185,11 +185,7 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
     combined_scores = ((similarities * 0.7) + (normalized_scores.values * score_boost.values * 0.3)) * format_boost.values
     
     sorted_indices = combined_scores.argsort()[::-1]
-    
-    print("\n" + "=" * 60)
-    print(f" Top {top_n} Recommendations For You ")
-    print("=" * 60)
-    
+
     count = 0
     seen_titles = []
     recommendations = []
