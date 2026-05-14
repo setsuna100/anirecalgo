@@ -16,6 +16,7 @@ def index():
 def recommend():
     data = request.json
     username = data.get('username')
+    allow_ecchi = data.get('allow_ecchi', False)
     
     if not username:
         return jsonify({"error": "Username is required"}), 400
@@ -26,7 +27,7 @@ def recommend():
         if not user_data:
             return jsonify({"error": "No user data found or list is private."}), 404
             
-        recs = get_recommendations_for_user(user_data, top_n=10)
+        recs = get_recommendations_for_user(user_data, top_n=10, allow_ecchi=allow_ecchi)
         return jsonify({"recommendations": recs})
         
     except Exception as e:
@@ -37,13 +38,15 @@ def recommend():
 def text_recommend():
     data = request.json
     query = data.get('query')
+    use_spoilers = data.get('use_spoilers', False)
+    allow_ecchi = data.get('allow_ecchi', False)
     
     if not query:
         return jsonify({"error": "Search query is required"}), 400
         
     try:
         # Call your local NLP model logic
-        recs_df = get_recommendations(query, top_n=10)
+        recs_df = get_recommendations(query, top_n=10, use_spoilers=use_spoilers, allow_ecchi=allow_ecchi)
         
         recs = []
         for _, row in recs_df.iterrows():
@@ -53,13 +56,29 @@ def text_recommend():
             
             genres = str(row['genres']).replace("|", ", ") if pd.notna(row['genres']) else "Unknown"
             fmt = row['format'] if pd.notna(row['format']) else "Unknown"
+            
+            episodes = ""
+            if pd.notna(row['episodes']) and str(row['episodes']).strip():
+                try:
+                    episodes = int(float(row['episodes']))
+                except ValueError:
+                    episodes = row['episodes']
             score = row['mean_score'] if pd.notna(row['mean_score']) else "N/A"
+            
+            year = ""
+            if pd.notna(row['season_year']) and str(row['season_year']).strip():
+                try:
+                    year = int(float(row['season_year']))
+                except ValueError:
+                    year = row['season_year']
             
             recs.append({
                 "title": title,
                 "format": fmt,
+                "episodes": episodes,
                 "score": score,
-                "genres": genres
+                "genres": genres,
+                "year": year
             })
             
         return jsonify({"recommendations": recs})

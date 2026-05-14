@@ -9,7 +9,7 @@
 <body>
 
     <h1>Anime Recommender Engine</h1>
-    <p class="subtitle">Enter your AniList username OR describe what you want to watch!</p>
+    <p class="subtitle">Enter your AniList username OR describe what you want to watch</p>
 
     <div class="search-container">
         <input type="text" id="username" placeholder="AniList Username (e.g. your_username)" onkeypress="if(event.key === 'Enter') getRecommendations()">
@@ -17,8 +17,13 @@
     </div>
 
     <div class="search-container">
-        <input type="text" id="textQuery" placeholder="Describe a vibe (e.g. dark fantasy with vampires)" onkeypress="if(event.key === 'Enter') getTextRecommendations()">
+        <input type="text" id="textQuery" placeholder="search from shows or genres you want to explore more of" onkeypress="if(event.key === 'Enter') getTextRecommendations()">
         <button id="textSearchBtn" onclick="getTextRecommendations()">By Description</button>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 20px;">
+        <label><input type="checkbox" id="useSpoilers"> Include Spoiler Tags</label>
+        <label style="margin-left: 15px;"><input type="checkbox" id="allowEcchi"> Include Ecchi</label>
     </div>
 
     <div id="loading" class="loader">Loading your personalized recommendations... this might take a moment.</div>
@@ -28,6 +33,7 @@
     <script>
         async function getRecommendations() {
             const username = document.getElementById('username').value.trim();
+            const allowEcchi = document.getElementById('allowEcchi').checked;
             const resultsDiv = document.getElementById('results');
             const errorDiv = document.getElementById('error');
             const loadingDiv = document.getElementById('loading');
@@ -47,7 +53,7 @@
                 const response = await fetch('/recommend', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username })
+                    body: JSON.stringify({ username, allow_ecchi: allowEcchi })
                 });
 
                 const data = await response.json();
@@ -63,11 +69,13 @@
 
                 if (data.recommendations && data.recommendations.length > 0) {
                     data.recommendations.forEach((rec, index) => {
+                        const epsText = (rec.format && String(rec.format).toUpperCase() === 'TV' && rec.episodes) ? ` (${rec.episodes} eps)` : '';
+                        const yearText = rec.year ? ` (${rec.year})` : '';
                         const card = document.createElement('div');
                         card.className = 'card';
                         card.innerHTML = `
-                            <h3>${index + 1}. ${rec.title}</h3>
-                            <div class="meta"><strong>Format:</strong> ${rec.format} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <h3>${index + 1}. ${rec.title}${yearText}</h3>
+                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
                             <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
                         `;
                         resultsDiv.appendChild(card);
@@ -84,6 +92,8 @@
 
         async function getTextRecommendations() {
             const query = document.getElementById('textQuery').value.trim();
+            const useSpoilers = document.getElementById('useSpoilers').checked;
+            const allowEcchi = document.getElementById('allowEcchi').checked;
             const resultsDiv = document.getElementById('results');
             const errorDiv = document.getElementById('error');
             const loadingDiv = document.getElementById('loading');
@@ -103,7 +113,7 @@
                 const response = await fetch('/text_recommend', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query })
+                    body: JSON.stringify({ query, use_spoilers: useSpoilers, allow_ecchi: allowEcchi })
                 });
 
                 const data = await response.json();
@@ -119,11 +129,13 @@
 
                 if (data.recommendations && data.recommendations.length > 0) {
                     data.recommendations.forEach((rec, index) => {
+                        const epsText = (rec.format && String(rec.format).toUpperCase() === 'TV' && rec.episodes) ? ` (${rec.episodes} eps)` : '';
+                        const yearText = rec.year ? ` (${rec.year})` : '';
                         const card = document.createElement('div');
                         card.className = 'card';
                         card.innerHTML = `
-                            <h3>${index + 1}. ${rec.title}</h3>
-                            <div class="meta"><strong>Format:</strong> ${rec.format} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
+                            <h3>${index + 1}. ${rec.title}${yearText}</h3>
+                            <div class="meta"><strong>Format:</strong> ${rec.format}${epsText} &nbsp;|&nbsp; <strong>Score:</strong> ${rec.score}</div>
                             <div class="genres"><strong>Genres:</strong> ${rec.genres}</div>
                         `;
                         resultsDiv.appendChild(card);

@@ -79,7 +79,7 @@ def load_user_list_csv(csv_path: str):
         })
     return user_anime
 
-def get_recommendations_for_user(user_anime, top_n=10):
+def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
     print("Loading recommendation system (this takes just a second)...")
     
     df = pd.read_pickle('anime_df.pkl')
@@ -153,6 +153,13 @@ def get_recommendations_for_user(user_anime, top_n=10):
         if row['id'] in watched_ids:
             continue
             
+        # Filter out Ecchi/Hentai if not allowed
+        if not allow_ecchi:
+            g_str = str(row['genres']).lower() if pd.notna(row['genres']) else ""
+            t_str = str(row['tags']).lower() if pd.notna(row['tags']) else ""
+            if 'ecchi' in g_str or 'hentai' in g_str or 'ecchi' in t_str or 'hentai' in t_str:
+                continue
+
         t_eng = str(row['title_english']) if pd.notna(row['title_english']) and row['title_english'] else ""
         t_rom = str(row['title_romaji']) if pd.notna(row['title_romaji']) and row['title_romaji'] else ""
         title = t_eng if t_eng else t_rom

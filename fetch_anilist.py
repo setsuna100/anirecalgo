@@ -41,6 +41,14 @@ query ($page: Int, $perPage: Int) {
           name
         }
       }
+      relations {
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
+      }
     }
   }
 }
@@ -102,15 +110,21 @@ def build_row(anime):
 
     genres = "|".join(anime.get("genres") or [])
 
-    # Filter out spoiler tags and sort by rank descending
+    # Sort and separate tags into regular and spoiler tags
     tags = anime.get("tags") or []
-    non_spoiler_tags = [t for t in tags if not t.get("isMediaSpoiler")]
-    non_spoiler_tags.sort(key=lambda t: t.get("rank", 0), reverse=True)
-    tag_names = "|".join(t["name"] for t in non_spoiler_tags)
-    tag_categories = "|".join(t["category"] for t in non_spoiler_tags)
+    non_spoilers = sorted([t for t in tags if not t.get("isMediaSpoiler")], key=lambda t: t.get("rank", 0), reverse=True)
+    spoilers = sorted([t for t in tags if t.get("isMediaSpoiler")], key=lambda t: t.get("rank", 0), reverse=True)
+
+    tag_names = "|".join(t["name"] for t in non_spoilers)
+    tag_categories = "|".join(t["category"] for t in non_spoilers)
+    sp_tag_names = "|".join(t["name"] for t in spoilers)
 
     studios = anime.get("studios", {}).get("nodes") or []
     main_studio = studios[0]["name"] if studios else ""
+
+    relations = anime.get("relations", {}).get("edges") or []
+    prequels = [str(edge["node"]["id"]) for edge in relations if edge.get("relationType") == "PREQUEL"]
+    sequels = [str(edge["node"]["id"]) for edge in relations if edge.get("relationType") == "SEQUEL"]
 
     return {
         "id": anime["id"],
@@ -129,7 +143,10 @@ def build_row(anime):
         "genres": genres,
         "tags": tag_names,
         "tag_categories": tag_categories,
+        "sp_tags": sp_tag_names,
         "main_studio": main_studio,
+        "prequel_id": "|".join(prequels),
+        "sequel_id": "|".join(sequels),
     }
 
 def export_csv(anime_list, output_path):
@@ -137,7 +154,8 @@ def export_csv(anime_list, output_path):
         "id", "title_english", "title_romaji", "title_native",
         "format", "status", "episodes", "season", "season_year",
         "average_score", "mean_score", "popularity", "favourites",
-        "genres", "tags", "tag_categories", "main_studio",
+        "genres", "tags", "tag_categories", "sp_tags", "main_studio", 
+        "prequel_id", "sequel_id"
     ]
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -150,5 +168,5 @@ def export_csv(anime_list, output_path):
 
 if __name__ == "__main__":
     anime_list = fetch_top_5000()
-    output_path = "top5000.csv"
+    output_path = "Top5000.csv"
     export_csv(anime_list, output_path)

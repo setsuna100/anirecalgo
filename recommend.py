@@ -5,14 +5,15 @@ import re
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-print("Loading recommendation system (this takes just a second)...")
-
 # 1. Load the DataFrame
 df = pd.read_pickle('anime_df.pkl')
 
 # 2. Load the pre-computed embeddings
 with open('anime_embeddings.pkl', 'rb') as f:
-    anime_embeddings = pickle.load(f)
+    anime_embeddings_spoilers = pickle.load(f)
+
+with open('anime_embeddings_no_spoilers.pkl', 'rb') as f:
+    anime_embeddings_no_spoilers = pickle.load(f)
 
 # 3. Load the local NLP Model
 model = SentenceTransformer('./local_anime_model')
@@ -31,7 +32,57 @@ if 'tags' in df.columns:
 # Sort keywords by length descending so longer phrases match before shorter ones
 valid_keywords = sorted(list(all_genres_tags), key=len, reverse=True)
 
-def get_recommendations(query, top_n=5):
+# 5. Build franchise groupings to prioritize the earliest show
+def clean_id(val):
+    s = str(val).strip()
+    return s[:-2] if s.endswith('.0') else s
+
+id_to_idx = {clean_id(df.iloc[i]['id']): i for i in range(len(df))}
+franchise_graph = {aid: set() for aid in id_to_idx}
+
+if 'prequel_id' in df.columns and 'sequel_id' in df.columns:
+    for aid, idx in id_to_idx.items():
+        row = df.iloc[idx]
+        if pd.notna(row.get('prequel_id')) and str(row['prequel_id']).strip():
+            franchise_graph[aid].update(clean_id(x) for x in str(row['prequel_id']).split('|') if x.strip())
+        if pd.notna(row.get('sequel_id')) and str(row['sequel_id']).strip():
+            franchise_graph[aid].update(clean_id(x) for x in str(row['sequel_id']).split('|') if x.strip())
+
+# Ensure bi-directional edges
+for node, neighbors in list(franchise_graph.items()):
+    for neighbor in neighbors:
+        if neighbor not in franchise_graph:
+            franchise_graph[neighbor] = set()
+        franchise_graph[neighbor].add(node)
+
+visited = set()
+idx_to_earliest_idx = {}
+
+for node in franchise_graph:
+    if node not in visited:
+        component = set()
+        stack = [node]
+        while stack:
+            curr = stack.pop()
+            if curr not in visited:
+                visited.add(curr)
+                component.add(curr)
+                for neighbor in franchise_graph.get(curr, []):
+                    if neighbor not in visited:
+                        stack.append(neighbor)
+        
+        valid_indices = [id_to_idx[n] for n in component if n in id_to_idx]
+        if valid_indices:
+            def get_sort_key(i):
+                y = df.iloc[i].get('season_year')
+                try: return float(y)
+                except (ValueError, TypeError): return 9999.0
+            
+            earliest_idx = min(valid_indices, key=lambda i: (get_sort_key(i), i))
+            for i in valid_indices:
+                idx_to_earliest_idx[i] = earliest_idx
+
+def get_recommendations(query, top_n=5, use_spoilers=False, allow_ecchi=False):
     original_query_lower = query.lower()
     search_query = query
     
@@ -79,11 +130,15 @@ def get_recommendations(query, top_n=5):
 
     # Convert user query to a semantic vector
     query_embedding = model.encode([search_query])
+
+    # Choose which embeddings to search against
+    target_embeddings = anime_embeddings_spoilers if use_spoilers else anime_embeddings_no_spoilers
+
     # Compare the query vector to all anime vectors using cosine similarity
-    similarities = cosine_similarity(query_embedding, anime_embeddings)[0]
+    similarities = cosine_similarity(query_embedding, target_embeddings)[0]
     
-    # Normalize mean scores to be between 0 and 1, defaulting to 50 if missing
-    mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(50)
+    # Normalize mean scores to be between 0 and 1, defaulting to 0 if missing
+    mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(0)
     normalized_scores = mean_scores / 100.0
     
     # Soft score filter: gives a 20% score weight boost to shows with a mean score of 75 and above
@@ -115,7 +170,19 @@ def get_recommendations(query, top_n=5):
     seen_titles = []
     query_lower = original_query_lower
 
-    for idx in sorted_indices:
+    for original_idx in sorted_indices:
+        idx = idx_to_earliest_idx.get(int(original_idx), int(original_idx))
+        
+        if idx in selected_indices:
+            continue
+            
+        # Filter out Ecchi/Hentai if not allowed
+        if not allow_ecchi:
+            g_str = str(df.iloc[idx]['genres']).lower() if pd.notna(df.iloc[idx]['genres']) else ""
+            t_str = str(df.iloc[idx]['tags']).lower() if pd.notna(df.iloc[idx]['tags']) else ""
+            if 'ecchi' in g_str or 'hentai' in g_str or 'ecchi' in t_str or 'hentai' in t_str:
+                continue
+
         row = df.iloc[idx]
         t_eng = str(row['title_english']) if pd.notna(row['title_english']) and row['title_english'] else ""
         t_rom = str(row['title_romaji']) if pd.notna(row['title_romaji']) and row['title_romaji'] else ""
@@ -158,5 +225,20 @@ if __name__ == "__main__":
         for i, row in enumerate(recs.itertuples(), 1):
             title = row.title_english if row.title_english else row.title_romaji
             genres = str(row.genres).replace("|", ", ")
-            print(f"{i}. {title} ({row.format}, Score: {row.mean_score}) - {genres}")
+            
+            year = ""
+            if pd.notna(row.season_year) and str(row.season_year).strip():
+                try:
+                    year = f" ({int(float(row.season_year))})"
+                except ValueError:
+                    pass
+
+            fmt = str(row.format)
+            if fmt.upper() == 'TV' and pd.notna(row.episodes) and str(row.episodes).strip():
+                try:
+                    fmt += f" ({int(float(row.episodes))} eps)"
+                except ValueError:
+                    pass
+                    
+            print(f"{i}. {title}{year} ({fmt}, Score: {row.mean_score}) - {genres}")
         print("-" * 50)
