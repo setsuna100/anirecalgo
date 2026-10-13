@@ -33,12 +33,17 @@ def fetch_user_list_api(username: str):
     print(f"Fetching anime list for user: {username}...")
     variables = {"userName": username}
     
-    response = requests.post(
-        ANILIST_API,
-        json={"query": USER_LIST_QUERY, "variables": variables},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-        timeout=15
-    )
+    try:
+        response = requests.post(
+            ANILIST_API,
+            json={"query": USER_LIST_QUERY, "variables": variables},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=60
+        )
+    except requests.Timeout:
+        raise ValueError("AniList API request timed out. The user's list might be too large or the API is currently slow.")
+    except requests.RequestException as e:
+        raise ValueError(f"Failed to connect to AniList API: {e}")
     
     if response.status_code == 404:
         raise ValueError("User not found.")
@@ -84,6 +89,12 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
     df = pd.read_pickle('anime_df.pkl')
     with open('anime_embeddings.pkl', 'rb') as f:
         anime_embeddings = pickle.load(f)
+        
+    use_cf = False
+    if os.path.exists('cf_embeddings.pkl'):
+        with open('cf_embeddings.pkl', 'rb') as f:
+            cf_embeddings = pickle.load(f)
+        use_cf = True
 
     def clean_id(val):
         s = str(val).strip()
@@ -173,9 +184,22 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
         
     user_embs = anime_embeddings[liked_indices]
     weights = np.array([liked_weights.get(df.iloc[idx]['id'], 1.0) for idx in liked_indices])
-    profile_embedding = np.average(user_embs, axis=0, weights=weights).reshape(1, -1)
+    profile_embedding_nlp = np.average(user_embs, axis=0, weights=weights).reshape(1, -1)
+    sim_nlp = cosine_similarity(profile_embedding_nlp, anime_embeddings)[0]
     
-    similarities = cosine_similarity(profile_embedding, anime_embeddings)[0]
+    if use_cf:
+        user_embs_cf = cf_embeddings[liked_indices]
+        profile_embedding_cf = np.average(user_embs_cf, axis=0, weights=weights).reshape(1, -1)
+        
+        # Avoid warnings/errors if the CF profile has no data (all zeros)
+        if np.any(profile_embedding_cf):
+            sim_cf = cosine_similarity(profile_embedding_cf, cf_embeddings)[0]
+            # Hybrid Model: 75% Content-Based (NLP), 25% Collaborative Filtering (User Ratings)
+            similarities = (sim_nlp * 0.75) + (sim_cf * 0.25)
+        else:
+            similarities = sim_nlp
+    else:
+        similarities = sim_nlp
     
     mean_scores = pd.to_numeric(df['mean_score'], errors='coerce').fillna(50)
     normalized_scores = mean_scores / 100.0
@@ -227,15 +251,26 @@ def get_recommendations_for_user(user_anime, top_n=10, allow_ecchi=False):
             
         seen_titles.extend([t for t in (t_eng, t_rom) if t])
         genres = str(row['genres']).replace("|", ", ") if pd.notna(row['genres']) else "Unknown"
-        fmt = row['format'] if pd.notna(row['format']) else "Unknown"
-        score = row['mean_score'] if pd.notna(row['mean_score']) else "N/A"
+        fmt = str(row['format']) if pd.notna(row['format']) else "Unknown"
+        
+        try:
+            score = int(float(row['mean_score'])) if pd.notna(row['mean_score']) else "N/A"
+        except ValueError:
+            score = str(row['mean_score'])
         
         episodes = ""
-        if pd.notna(row['season_year']) and str(row['season_year']).strip():
+        if pd.notna(row.get('episodes')) and str(row['episodes']).strip():
+            try:
+                episodes = int(float(row['episodes']))
+            except ValueError:
+                episodes = str(row['episodes'])
+                
+        year = ""
+        if pd.notna(row.get('season_year')) and str(row['season_year']).strip():
             try:
                 year = int(float(row['season_year']))
             except ValueError:
-                year = row['season_year']
+                year = str(row['season_year'])
                 
         match_pct = f"{similarities[idx] * 100:.1f}%"
                 

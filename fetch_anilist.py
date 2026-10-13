@@ -13,7 +13,7 @@ query ($page: Int, $perPage: Int) {
       lastPage
       hasNextPage
     }
-    media(type: ANIME, sort: POPULARITY_DESC) {
+    media(type: ANIME, sort: POPULARITY_DESC, format_in: [TV, MOVIE, ONA, OVA], duration_greater: 9) {
       id
       title {
         romaji
@@ -74,7 +74,7 @@ def fetch_top_5000():
     total_needed = 5000
     page = 1
 
-    print("Fetching top 5000 anime from AniList...")
+    print("Fetching top 5000 TV, Movie, ONA, and OVA anime (>= 10 mins) from AniList...")
 
     while len(all_anime) < total_needed:
         print(f"  Fetching page {page} ({len(all_anime)}/{total_needed})...")

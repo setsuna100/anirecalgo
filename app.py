@@ -55,22 +55,26 @@ def text_recommend():
             title = t_eng if t_eng else t_rom
             
             genres = str(row['genres']).replace("|", ", ") if pd.notna(row['genres']) else "Unknown"
-            fmt = row['format'] if pd.notna(row['format']) else "Unknown"
+            fmt = str(row['format']) if pd.notna(row['format']) else "Unknown"
             
             episodes = ""
             if pd.notna(row['episodes']) and str(row['episodes']).strip():
                 try:
                     episodes = int(float(row['episodes']))
                 except ValueError:
-                    episodes = row['episodes']
-            score = row['mean_score'] if pd.notna(row['mean_score']) else "N/A"
+                    episodes = str(row['episodes'])
+                    
+            try:
+                score = int(float(row['mean_score'])) if pd.notna(row['mean_score']) else "N/A"
+            except ValueError:
+                score = str(row['mean_score'])
             
             year = ""
             if pd.notna(row['season_year']) and str(row['season_year']).strip():
                 try:
                     year = int(float(row['season_year']))
                 except ValueError:
-                    year = row['season_year']
+                    year = str(row['season_year'])
             
             match_score = f"{row['match_score'] * 100:.1f}%" if 'match_score' in row else "N/A"
             

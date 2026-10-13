@@ -55,7 +55,8 @@ df['description'] = (
     df['weighted_tags'] + ' ' + 
     df['weighted_sp_tags'] + ' ' + 
     df['format'].astype(str) + ' episodes: ' + 
-    df['episodes'].astype(str)
+    df['episodes'].astype(str) + ' studio: ' + 
+    df['main_studio'].astype(str)
 )
 
 df['description_no_spoilers'] = (
@@ -63,7 +64,8 @@ df['description_no_spoilers'] = (
     df['weighted_genres'] + ' ' + 
     df['weighted_tags'] + ' ' + 
     df['format'].astype(str) + ' episodes: ' + 
-    df['episodes'].astype(str)
+    df['episodes'].astype(str) + ' studio: ' + 
+    df['main_studio'].astype(str)
 )
 
 from sentence_transformers import SentenceTransformer
